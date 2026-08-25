@@ -62,24 +62,6 @@ export default function StudentScan() {
 
   // Render camera permission UI
   const renderCameraSection = () => {
-    if (Platform.OS === 'web') {
-      // For web, display mock scanner viewfinder since camera permissions can be tricky
-      return (
-        <View className="w-full aspect-square bg-slate-950 rounded-3xl border border-indigo-500/30 overflow-hidden items-center justify-center relative mb-8">
-          <View className="w-48 h-48 border-2 border-indigo-500 rounded-2xl opacity-80 items-center justify-center">
-            <View className="w-4 h-4 border-t-2 border-l-2 border-indigo-400 absolute top-[-2] left-[-2]" />
-            <View className="w-4 h-4 border-t-2 border-r-2 border-indigo-400 absolute top-[-2] right-[-2]" />
-            <View className="w-4 h-4 border-b-2 border-l-2 border-indigo-400 absolute bottom-[-2] left-[-2]" />
-            <View className="w-4 h-4 border-b-2 border-r-2 border-indigo-400 absolute bottom-[-2] right-[-2]" />
-            <Text className="text-indigo-400 text-xs font-semibold text-center uppercase tracking-wider px-2">
-              Align QR Code Inside Box
-            </Text>
-          </View>
-          <View className="w-56 h-[1.5px] bg-indigo-500 absolute top-1/2 opacity-70" />
-        </View>
-      );
-    }
-
     if (!permission) {
       // Loading state
       return (
