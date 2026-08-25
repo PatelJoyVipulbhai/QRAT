@@ -95,6 +95,9 @@ export default function StudentScan() {
       <View className="w-full aspect-square bg-slate-950 rounded-3xl border border-indigo-500/30 overflow-hidden relative mb-8">
         <CameraView
           style={StyleSheet.absoluteFillObject}
+          barcodeScannerSettings={{
+            barcodeTypes: ["qr"],
+          }}
           onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
         />
         {/* Transparent Overlay Viewfinder */}
