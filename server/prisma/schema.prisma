@@ -1,0 +1,229 @@
+// Prisma Schema for Full Attendance Management System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum AttendanceMethod {
+  QR
+  SIX_DIGIT_CODE
+  PHOTO
+  MANUAL
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum LectureStatus {
+  SCHEDULED
+  ACTIVE
+  CLOSED
+}
+
+enum EntityStatus {
+  Active
+  Inactive
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  admin        Admin?
+  teacher      Teacher?
+  student      Student?
+  auditLogs    AuditLog[]
+}
+
+model Admin {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  fullName  String
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Teacher {
+  id         String         @id @default(uuid())
+  userId     String         @unique
+  teacherId  String         @unique
+  fullName   String
+  email      String         @unique
+  phone      String?
+  department String
+  status     EntityStatus   @default(Active)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjects   TeacherSubject[]
+  lectures   Lecture[]
+}
+
+model Student {
+  id               String          @id @default(uuid())
+  userId           String          @unique
+  studentId        String          @unique
+  rollNumber       String          @unique
+  fullName         String
+  email            String          @unique
+  phone            String?
+  department       String
+  semester         String
+  profilePhoto     String?
+  faceConsentGiven Boolean         @default(false)
+  status           EntityStatus    @default(Active)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollments      Enrollment[]
+  attendances      Attendance[]
+}
+
+model Class {
+  id          String       @id @default(uuid())
+  name        String       // e.g. "BBA Sem 1"
+  code        String       @unique
+  department  String
+  semester    String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  batches     Batch[]
+  enrollments Enrollment[]
+  lectures    Lecture[]
+}
+
+model Batch {
+  id          String       @id @default(uuid())
+  name        String       // e.g. "Division A"
+  classId     String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  class       Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  enrollments Enrollment[]
+  lectures    Lecture[]
+}
+
+model Subject {
+  id          String           @id @default(uuid())
+  name        String           // e.g. "Economics"
+  code        String           @unique
+  department  String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  teachers    TeacherSubject[]
+  lectures    Lecture[]
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  studentId String
+  classId   String
+  batchId   String?
+  createdAt DateTime @default(now())
+
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  batch     Batch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, classId])
+}
+
+model TeacherSubject {
+  id        String   @id @default(uuid())
+  teacherId String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, subjectId])
+}
+
+model Lecture {
+  id                        String            @id @default(uuid())
+  teacherId                 String
+  classId                   String
+  batchId                   String?
+  subjectId                 String
+  title                     String
+  date                      String            // YYYY-MM-DD
+  startTime                 String            // HH:MM
+  endTime                   String            // HH:MM
+  attendanceDurationMinutes Int               @default(10)
+  expiresAt                 DateTime
+  status                    LectureStatus     @default(ACTIVE)
+  currentCode               String?
+  qrSecret                  String?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  teacher                   Teacher           @relation(fields: [teacherId], references: [id])
+  class                     Class             @relation(fields: [classId], references: [id])
+  batch                     Batch?            @relation(fields: [batchId], references: [id])
+  subject                   Subject           @relation(fields: [subjectId], references: [id])
+  attendances               Attendance[]
+  classroomImages           ClassroomImage[]
+}
+
+model Attendance {
+  id         String           @id @default(uuid())
+  lectureId  String
+  studentId  String
+  status     AttendanceStatus @default(PRESENT)
+  method     AttendanceMethod @default(QR)
+  confidence Float?
+  note       String?
+  markedAt   DateTime         @default(now())
+
+  lecture    Lecture          @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+  student    Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, lectureId])
+}
+
+model ClassroomImage {
+  id         String   @id @default(uuid())
+  lectureId  String
+  imageUrl   String
+  uploadedAt DateTime @default(now())
+
+  lecture    Lecture  @relation(fields: [lectureId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  details   String?
+  timestamp DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

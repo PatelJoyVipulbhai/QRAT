@@ -36,6 +36,16 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# SQLite databases
+*.db
+*.db-journal
+*.sqlite
+
+# Environment files
+.env
+.env.*
+!.env.example
+
 app-example
 
 # generated native folders

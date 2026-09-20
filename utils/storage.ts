@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getFirestore, 
   collection, 
@@ -8,6 +8,28 @@ import {
   onSnapshot,
   updateDoc
 } from "firebase/firestore";
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  User as FirebaseUser
+} from "firebase/auth";
+
+export type UserRole = 'teacher' | 'student';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  role: UserRole;
+  fullName: string;
+  facultyId?: string;
+  department?: string;
+  rollNumber?: string;
+  className?: string;
+  createdAt: number;
+}
 
 export interface AttendanceSession {
   sessionId: string;
@@ -19,6 +41,7 @@ export interface AttendanceSession {
   endTime: string; // HH:MM AM/PM
   status: 'Active' | 'Ended';
   createdAt: number;
+  facultyUid?: string;
 }
 
 export interface AttendanceRecord {
@@ -28,9 +51,10 @@ export interface AttendanceRecord {
   rollNumber: string;
   markedAt: string; // HH:MM AM/PM
   status: 'Present';
+  studentUid?: string;
 }
 
-// Your web app's Firebase configuration
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCAEXGMfEyn19Jq6xTW0uoj_jrq2D86DkI",
   authDomain: "hisab-14.firebaseapp.com",
@@ -40,9 +64,14 @@ const firebaseConfig = {
   appId: "1:696479861155:web:14bfa0ada311fde2fd7216"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Initialize Firebase safely
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+// Cached current user profile
+let currentUserProfile: UserProfile | null = null;
+const authListeners = new Set<(user: UserProfile | null) => void>();
 
 const defaultSession: AttendanceSession = {
   sessionId: "1234",
@@ -50,7 +79,7 @@ const defaultSession: AttendanceSession = {
   subjectName: "Financial Management",
   className: "BBA Semester 1 - Division A",
   date: new Date().toISOString().split('T')[0],
-  startTime: "12:00 AM", // 24h window for prototype convenience
+  startTime: "12:00 AM",
   endTime: "11:59 PM",
   status: "Active",
   createdAt: Date.now()
@@ -61,10 +90,14 @@ let sessionsCache: AttendanceSession[] = [defaultSession];
 let recordsCache: AttendanceRecord[] = [];
 const listeners = new Set<() => void>();
 
-// Helper functions for localStorage backup (crucial for sharing state between browser tabs offline)
+// Helper functions for localStorage backup
 const loadLocalBackup = () => {
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
+      const savedUser = window.localStorage.getItem('attendance_auth_user');
+      if (savedUser) {
+        currentUserProfile = JSON.parse(savedUser);
+      }
       const savedSessions = window.localStorage.getItem('attendance_sessions');
       if (savedSessions) {
         sessionsCache = JSON.parse(savedSessions);
@@ -77,7 +110,6 @@ const loadLocalBackup = () => {
       console.warn("Failed to load local storage backup:", e);
     }
   }
-  // Ensure default session exists
   if (!sessionsCache.some(s => s.sessionId === "1234")) {
     sessionsCache.push(defaultSession);
   }
@@ -86,6 +118,11 @@ const loadLocalBackup = () => {
 const saveLocalBackup = () => {
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
+      if (currentUserProfile) {
+        window.localStorage.setItem('attendance_auth_user', JSON.stringify(currentUserProfile));
+      } else {
+        window.localStorage.removeItem('attendance_auth_user');
+      }
       window.localStorage.setItem('attendance_sessions', JSON.stringify(sessionsCache));
       window.localStorage.setItem('attendance_records', JSON.stringify(recordsCache));
     } catch (e) {
@@ -94,8 +131,161 @@ const saveLocalBackup = () => {
   }
 };
 
-// Run initial load from localStorage backup
 loadLocalBackup();
+
+// Real-time Auth state sync
+onAuthStateChanged(auth, async (fbUser) => {
+  if (fbUser) {
+    try {
+      const userDocRef = doc(db, "users", fbUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        currentUserProfile = userSnap.data() as UserProfile;
+      } else if (!currentUserProfile || currentUserProfile.uid !== fbUser.uid) {
+        currentUserProfile = {
+          uid: fbUser.uid,
+          email: fbUser.email || "",
+          role: 'student',
+          fullName: fbUser.displayName || fbUser.email?.split('@')[0] || "User",
+          createdAt: Date.now()
+        };
+      }
+    } catch (err) {
+      console.warn("Error fetching user profile:", err);
+    }
+  } else {
+    // If not authenticated in firebase, check if we keep local user or clear
+    if (typeof window !== 'undefined' && !window.localStorage.getItem('attendance_auth_user')) {
+      currentUserProfile = null;
+    }
+  }
+  saveLocalBackup();
+  authListeners.forEach(cb => cb(currentUserProfile));
+});
+
+// Authentication APIs
+export const registerUser = async (data: {
+  email: string;
+  password: string;
+  role: UserRole;
+  fullName: string;
+  facultyId?: string;
+  department?: string;
+  rollNumber?: string;
+  className?: string;
+}): Promise<{ success: boolean; error?: string; user?: UserProfile }> => {
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, data.email.trim(), data.password);
+    const profile: UserProfile = {
+      uid: cred.user.uid,
+      email: data.email.trim(),
+      role: data.role,
+      fullName: data.fullName.trim(),
+      facultyId: data.facultyId?.trim(),
+      department: data.department?.trim(),
+      rollNumber: data.rollNumber?.trim(),
+      className: data.className?.trim(),
+      createdAt: Date.now()
+    };
+
+    currentUserProfile = profile;
+    saveLocalBackup();
+    authListeners.forEach(cb => cb(profile));
+
+    // Save profile to Firestore
+    setDoc(doc(db, "users", cred.user.uid), profile).catch(err => {
+      console.warn("Failed to sync profile to Firestore:", err);
+    });
+
+    return { success: true, user: profile };
+  } catch (err: any) {
+    console.error("Registration error:", err);
+    let message = "Registration failed. Please try again.";
+    if (err.code === "auth/email-already-in-use") {
+      message = "This email is already registered. Please sign in.";
+    } else if (err.code === "auth/invalid-email") {
+      message = "Please provide a valid email address.";
+    } else if (err.code === "auth/weak-password") {
+      message = "Password should be at least 6 characters.";
+    } else if (err.message) {
+      message = err.message;
+    }
+    return { success: false, error: message };
+  }
+};
+
+export const loginUser = async (
+  email: string, 
+  password: string
+): Promise<{ success: boolean; error?: string; user?: UserProfile }> => {
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    let profile: UserProfile;
+
+    try {
+      const userSnap = await getDoc(doc(db, "users", cred.user.uid));
+      if (userSnap.exists()) {
+        profile = userSnap.data() as UserProfile;
+      } else {
+        profile = {
+          uid: cred.user.uid,
+          email: cred.user.email || email,
+          role: 'teacher',
+          fullName: cred.user.displayName || email.split('@')[0],
+          createdAt: Date.now()
+        };
+      }
+    } catch {
+      profile = {
+        uid: cred.user.uid,
+        email: cred.user.email || email,
+        role: 'teacher',
+        fullName: cred.user.displayName || email.split('@')[0],
+        createdAt: Date.now()
+      };
+    }
+
+    currentUserProfile = profile;
+    saveLocalBackup();
+    authListeners.forEach(cb => cb(profile));
+
+    return { success: true, user: profile };
+  } catch (err: any) {
+    console.error("Login error:", err);
+    let message = "Sign in failed. Please check your credentials.";
+    if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+      message = "Invalid email or password.";
+    } else if (err.code === "auth/invalid-email") {
+      message = "Invalid email format.";
+    } else if (err.message) {
+      message = err.message;
+    }
+    return { success: false, error: message };
+  }
+};
+
+export const logoutUser = async (): Promise<void> => {
+  try {
+    await signOut(auth);
+  } catch (e) {
+    console.warn("SignOut error:", e);
+  }
+  currentUserProfile = null;
+  saveLocalBackup();
+  authListeners.forEach(cb => cb(null));
+};
+
+export const getCurrentUserProfile = (): UserProfile | null => {
+  return currentUserProfile;
+};
+
+export const subscribeToAuth = (listener: (user: UserProfile | null) => void) => {
+  authListeners.add(listener);
+  listener(currentUserProfile);
+  return () => {
+    authListeners.delete(listener);
+  };
+};
 
 // Seed default session '1234' if it doesn't exist
 const seedDefaultSession = async () => {
@@ -114,8 +304,6 @@ seedDefaultSession();
 // Subscribe to Firestore collections in real-time
 onSnapshot(collection(db, "sessions"), (snapshot) => {
   const dbSessions = snapshot.docs.map(doc => doc.data() as AttendanceSession);
-  
-  // Merge Firestore sessions into our local sessions
   const mergedSessions = [...dbSessions];
   sessionsCache.forEach(localSec => {
     if (!mergedSessions.some(s => s.sessionId === localSec.sessionId)) {
@@ -123,12 +311,9 @@ onSnapshot(collection(db, "sessions"), (snapshot) => {
     }
   });
   sessionsCache = mergedSessions;
-  
-  // Ensure default session 1234 is present
   if (!sessionsCache.some(s => s.sessionId === "1234")) {
     sessionsCache.push(defaultSession);
   }
-  
   saveLocalBackup();
   listeners.forEach(l => l());
 }, (error) => {
@@ -137,8 +322,6 @@ onSnapshot(collection(db, "sessions"), (snapshot) => {
 
 onSnapshot(collection(db, "records"), (snapshot) => {
   const dbRecords = snapshot.docs.map(doc => doc.data() as AttendanceRecord);
-  
-  // Merge Firestore records
   const mergedRecords = [...dbRecords];
   recordsCache.forEach(localRec => {
     if (!mergedRecords.some(r => r.attendanceId === localRec.attendanceId)) {
@@ -146,7 +329,6 @@ onSnapshot(collection(db, "records"), (snapshot) => {
     }
   });
   recordsCache = mergedRecords;
-  
   saveLocalBackup();
   listeners.forEach(l => l());
 }, (error) => {
@@ -155,7 +337,6 @@ onSnapshot(collection(db, "records"), (snapshot) => {
 
 export const subscribeToStorage = (listener: () => void) => {
   listeners.add(listener);
-  // Trigger initial run
   listener();
   return () => {
     listeners.delete(listener);
@@ -176,15 +357,14 @@ export const createSession = (session: Omit<AttendanceSession, 'sessionId' | 'cr
     ...session,
     sessionId,
     status: 'Active',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    facultyUid: currentUserProfile?.uid
   };
   
-  // Update local memory cache immediately
   sessionsCache.unshift(newSession);
   saveLocalBackup();
   listeners.forEach(l => l());
 
-  // Attempt to save to Firestore
   setDoc(doc(db, "sessions", sessionId), newSession).catch((err: any) => {
     console.warn("Firestore save session failed (saved locally):", err.message);
   });
@@ -193,12 +373,10 @@ export const createSession = (session: Omit<AttendanceSession, 'sessionId' | 'cr
 };
 
 export const endSession = (sessionId: string): void => {
-  // Update local memory cache immediately
   sessionsCache = sessionsCache.map(s => s.sessionId === sessionId ? { ...s, status: 'Ended' as const } : s);
   saveLocalBackup();
   listeners.forEach(l => l());
 
-  // Attempt to save to Firestore
   updateDoc(doc(db, "sessions", sessionId), { status: 'Ended' }).catch((err: any) => {
     console.warn("Firestore end session failed (ended locally):", err.message);
   });
@@ -227,13 +405,11 @@ export const addAttendanceRecord = (
     return { success: false, error: 'This attendance session has ended.' };
   }
 
-  // Validate time: Check if session has expired (active for 10 minutes from creation)
   const sessionAgeInMinutes = (Date.now() - session.createdAt) / (1000 * 60);
   if (sessionId !== "1234" && sessionAgeInMinutes > 10) {
     return { success: false, error: 'This attendance session has expired (10 minutes limit exceeded).' };
   }
 
-  // Check duplicate in local cache
   const exists = recordsCache.some(r => 
     r.sessionId === sessionId && 
     r.rollNumber.toLowerCase() === rollNumber.trim().toLowerCase()
@@ -251,15 +427,14 @@ export const addAttendanceRecord = (
     studentName: studentName.trim(),
     rollNumber: rollNumber.trim(),
     markedAt: timeString,
-    status: 'Present'
+    status: 'Present',
+    studentUid: currentUserProfile?.uid
   };
 
-  // Add to local memory cache immediately
   recordsCache.unshift(newRecord);
   saveLocalBackup();
   listeners.forEach(l => l());
 
-  // Save to Firestore using a composite document ID
   const recordDocId = `${sessionId}_${rollNumber.trim().toLowerCase()}`;
   setDoc(doc(db, "records", recordDocId), newRecord).catch((err: any) => {
     console.warn("Firestore save record failed (marked locally):", err.message);
