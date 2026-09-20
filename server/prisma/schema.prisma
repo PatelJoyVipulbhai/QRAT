@@ -9,42 +9,11 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-enum Role {
-  ADMIN
-  TEACHER
-  STUDENT
-}
-
-enum AttendanceMethod {
-  QR
-  SIX_DIGIT_CODE
-  PHOTO
-  MANUAL
-}
-
-enum AttendanceStatus {
-  PRESENT
-  ABSENT
-  LATE
-  EXCUSED
-}
-
-enum LectureStatus {
-  SCHEDULED
-  ACTIVE
-  CLOSED
-}
-
-enum EntityStatus {
-  Active
-  Inactive
-}
-
 model User {
   id           String    @id @default(uuid())
   email        String    @unique
   passwordHash String
-  role         Role
+  role         String    // ADMIN, TEACHER, STUDENT
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -73,7 +42,7 @@ model Teacher {
   email      String         @unique
   phone      String?
   department String
-  status     EntityStatus   @default(Active)
+  status     String         @default("Active")
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
 
@@ -94,7 +63,7 @@ model Student {
   semester         String
   profilePhoto     String?
   faceConsentGiven Boolean         @default(false)
-  status           EntityStatus    @default(Active)
+  status           String          @default("Active")
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -179,7 +148,7 @@ model Lecture {
   endTime                   String            // HH:MM
   attendanceDurationMinutes Int               @default(10)
   expiresAt                 DateTime
-  status                    LectureStatus     @default(ACTIVE)
+  status                    String            @default("ACTIVE")
   currentCode               String?
   qrSecret                  String?
   createdAt                 DateTime          @default(now())
@@ -197,8 +166,8 @@ model Attendance {
   id         String           @id @default(uuid())
   lectureId  String
   studentId  String
-  status     AttendanceStatus @default(PRESENT)
-  method     AttendanceMethod @default(QR)
+  status     String           @default("PRESENT")
+  method     String           @default("QR")
   confidence Float?
   note       String?
   markedAt   DateTime         @default(now())
