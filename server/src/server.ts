@@ -211,6 +211,58 @@ app.post("/api/admin/students", authenticateToken, requireRole("ADMIN"), (req: R
   res.status(201).json(newStudent);
 });
 
+app.put("/api/admin/students/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { rollNumber, fullName, email, phone, classId, batchId, department, semester, faceConsentGiven, status } = req.body;
+  const data = db.getData();
+
+  const student = data.students.find((s) => s.id === id);
+  if (!student) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
+
+  const selectedClass = data.classes.find((c) => c.id === classId);
+  const selectedBatch = data.batches.find((b) => b.id === batchId);
+
+  student.fullName = fullName !== undefined ? fullName : student.fullName;
+  student.rollNumber = rollNumber !== undefined ? rollNumber : student.rollNumber;
+  student.email = email !== undefined ? email : student.email;
+  student.phone = phone !== undefined ? phone : student.phone;
+  student.classId = classId !== undefined ? classId : student.classId;
+  student.className = selectedClass ? selectedClass.name : student.className;
+  student.batchId = batchId !== undefined ? batchId : student.batchId;
+  student.batchName = selectedBatch ? selectedBatch.name : student.batchName;
+  student.department = department !== undefined ? department : student.department;
+  student.semester = semester !== undefined ? semester : student.semester;
+  student.faceConsentGiven = faceConsentGiven !== undefined ? !!faceConsentGiven : student.faceConsentGiven;
+  student.status = status !== undefined ? status : student.status;
+
+  db.save();
+  res.json(student);
+});
+
+app.delete("/api/admin/students/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const data = db.getData();
+
+  const index = data.students.findIndex((s) => s.id === id);
+  if (index === -1) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
+
+  const student = data.students[index];
+  // Remove user account, enrollments, attendances, and student record
+  data.students.splice(index, 1);
+  data.users = data.users.filter((u) => u.id !== student.userId);
+  data.enrollments = data.enrollments.filter((e) => e.studentId !== id);
+  data.attendances = data.attendances.filter((a) => a.studentId !== id);
+
+  db.save();
+  res.json({ message: "Student deleted successfully", id });
+});
+
 app.get("/api/admin/teachers", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
   const data = db.getData();
   const teachersWithSubjects = data.teachers.map((t) => {
@@ -222,7 +274,7 @@ app.get("/api/admin/teachers", authenticateToken, requireRole("ADMIN"), (req: Re
 });
 
 app.post("/api/admin/teachers", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
-  const { teacherId, fullName, email, phone, department, subjectIds } = req.body;
+  const { teacherId, fullName, email, phone, department, subjectIds, status } = req.body;
   const data = db.getData();
 
   const userId = `usr-tch-${Date.now()}`;
@@ -245,7 +297,7 @@ app.post("/api/admin/teachers", authenticateToken, requireRole("ADMIN"), (req: R
     email,
     phone: phone || "",
     department: department || "General",
-    status: "Active"
+    status: status || "Active"
   };
 
   data.teachers.unshift(newTeacher);
@@ -260,6 +312,54 @@ app.post("/api/admin/teachers", authenticateToken, requireRole("ADMIN"), (req: R
   res.status(201).json(newTeacher);
 });
 
+app.put("/api/admin/teachers/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { teacherId, fullName, email, phone, department, subjectIds, status } = req.body;
+  const data = db.getData();
+
+  const teacher = data.teachers.find((t) => t.id === id);
+  if (!teacher) {
+    res.status(404).json({ error: "Teacher not found" });
+    return;
+  }
+
+  teacher.fullName = fullName !== undefined ? fullName : teacher.fullName;
+  teacher.teacherId = teacherId !== undefined ? teacherId : teacher.teacherId;
+  teacher.email = email !== undefined ? email : teacher.email;
+  teacher.phone = phone !== undefined ? phone : teacher.phone;
+  teacher.department = department !== undefined ? department : teacher.department;
+  teacher.status = status !== undefined ? status : teacher.status;
+
+  if (Array.isArray(subjectIds)) {
+    data.teacherSubjects = data.teacherSubjects.filter((ts) => ts.teacherId !== id);
+    subjectIds.forEach((sId: string) => {
+      data.teacherSubjects.push({ id: `ts-${Date.now()}-${sId}`, teacherId: id, subjectId: sId });
+    });
+  }
+
+  db.save();
+  res.json(teacher);
+});
+
+app.delete("/api/admin/teachers/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const data = db.getData();
+
+  const index = data.teachers.findIndex((t) => t.id === id);
+  if (index === -1) {
+    res.status(404).json({ error: "Teacher not found" });
+    return;
+  }
+
+  const teacher = data.teachers[index];
+  data.teachers.splice(index, 1);
+  data.users = data.users.filter((u) => u.id !== teacher.userId);
+  data.teacherSubjects = data.teacherSubjects.filter((ts) => ts.teacherId !== id);
+
+  db.save();
+  res.json({ message: "Teacher deleted successfully", id });
+});
+
 app.get("/api/admin/classes", authenticateToken, (req: Request, res: Response) => {
   const data = db.getData();
   const classesWithBatches = data.classes.map((c) => {
@@ -270,9 +370,159 @@ app.get("/api/admin/classes", authenticateToken, (req: Request, res: Response) =
   res.json(classesWithBatches);
 });
 
+app.post("/api/admin/classes", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { name, code, department, semester } = req.body;
+  const data = db.getData();
+
+  const newClass = {
+    id: `cls-${Date.now()}`,
+    name,
+    code,
+    department: department || "General",
+    semester: semester || "Semester 1"
+  };
+
+  data.classes.push(newClass);
+  db.save();
+  res.status(201).json(newClass);
+});
+
+app.put("/api/admin/classes/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name, code, department, semester } = req.body;
+  const data = db.getData();
+
+  const cls = data.classes.find((c) => c.id === id);
+  if (!cls) {
+    res.status(404).json({ error: "Class not found" });
+    return;
+  }
+
+  cls.name = name !== undefined ? name : cls.name;
+  cls.code = code !== undefined ? code : cls.code;
+  cls.department = department !== undefined ? department : cls.department;
+  cls.semester = semester !== undefined ? semester : cls.semester;
+
+  db.save();
+  res.json(cls);
+});
+
+app.delete("/api/admin/classes/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const data = db.getData();
+
+  const index = data.classes.findIndex((c) => c.id === id);
+  if (index === -1) {
+    res.status(404).json({ error: "Class not found" });
+    return;
+  }
+
+  data.classes.splice(index, 1);
+  data.batches = data.batches.filter((b) => b.classId !== id);
+  db.save();
+  res.json({ message: "Class deleted successfully", id });
+});
+
+app.post("/api/admin/batches", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { name, classId } = req.body;
+  const data = db.getData();
+
+  const newBatch = {
+    id: `bat-${Date.now()}`,
+    name,
+    classId
+  };
+
+  data.batches.push(newBatch);
+  db.save();
+  res.status(201).json(newBatch);
+});
+
+app.put("/api/admin/batches/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  const data = db.getData();
+
+  const batch = data.batches.find((b) => b.id === id);
+  if (!batch) {
+    res.status(404).json({ error: "Batch not found" });
+    return;
+  }
+
+  batch.name = name !== undefined ? name : batch.name;
+  db.save();
+  res.json(batch);
+});
+
+app.delete("/api/admin/batches/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const data = db.getData();
+
+  const index = data.batches.findIndex((b) => b.id === id);
+  if (index === -1) {
+    res.status(404).json({ error: "Batch not found" });
+    return;
+  }
+
+  data.batches.splice(index, 1);
+  db.save();
+  res.json({ message: "Batch deleted successfully", id });
+});
+
 app.get("/api/admin/subjects", authenticateToken, (req: Request, res: Response) => {
   const data = db.getData();
   res.json(data.subjects);
+});
+
+app.post("/api/admin/subjects", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { name, code, department } = req.body;
+  const data = db.getData();
+
+  const newSubject = {
+    id: `sub-${Date.now()}`,
+    name,
+    code,
+    department: department || "General"
+  };
+
+  data.subjects.push(newSubject);
+  db.save();
+  res.status(201).json(newSubject);
+});
+
+app.put("/api/admin/subjects/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name, code, department } = req.body;
+  const data = db.getData();
+
+  const sub = data.subjects.find((s) => s.id === id);
+  if (!sub) {
+    res.status(404).json({ error: "Subject not found" });
+    return;
+  }
+
+  sub.name = name !== undefined ? name : sub.name;
+  sub.code = code !== undefined ? code : sub.code;
+  sub.department = department !== undefined ? department : sub.department;
+
+  db.save();
+  res.json(sub);
+});
+
+app.delete("/api/admin/subjects/:id", authenticateToken, requireRole("ADMIN"), (req: Request, res: Response) => {
+  const { id } = req.params;
+  const data = db.getData();
+
+  const index = data.subjects.findIndex((s) => s.id === id);
+  if (index === -1) {
+    res.status(404).json({ error: "Subject not found" });
+    return;
+  }
+
+  data.subjects.splice(index, 1);
+  data.teacherSubjects = data.teacherSubjects.filter((ts) => ts.subjectId !== id);
+  db.save();
+  res.json({ message: "Subject deleted successfully", id });
 });
 
 // ==========================================

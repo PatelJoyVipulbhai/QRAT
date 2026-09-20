@@ -359,27 +359,8 @@ function handleMockRequest(endpoint: string, options: RequestInit): any {
     return store.subjects;
   }
 
-  if (endpoint === "/admin/teachers") {
-    if (method === "POST") {
-      const newTeacher: TeacherDTO = {
-        id: "tch-" + Date.now(),
-        userId: "u-tch-" + Date.now(),
-        teacherId: body.teacherId || `FAC-${Date.now().toString().slice(-4)}`,
-        fullName: body.fullName,
-        email: body.email,
-        phone: body.phone,
-        department: body.department,
-        status: "Active"
-      };
-      store.teachers.push(newTeacher);
-      saveStore(store);
-      return newTeacher;
-    }
-    return store.teachers;
-  }
-
-  if (endpoint === "/admin/students") {
-    if (method === "POST") {
+  if (endpoint.startsWith("/admin/students")) {
+    if (endpoint === "/admin/students" && method === "POST") {
       const cls = store.classes.find(c => c.id === body.classId);
       const batch = cls?.batches?.find(b => b.id === body.batchId);
       const newStudent: StudentDTO = {
@@ -404,7 +385,153 @@ function handleMockRequest(endpoint: string, options: RequestInit): any {
       saveStore(store);
       return newStudent;
     }
+    if (method === "PUT") {
+      const id = endpoint.split("/")[3];
+      const stu = store.students.find(s => s.id === id);
+      if (stu) {
+        Object.assign(stu, body);
+        saveStore(store);
+        return stu;
+      }
+    }
+    if (method === "DELETE") {
+      const id = endpoint.split("/")[3];
+      store.students = store.students.filter(s => s.id !== id);
+      store.attendances = store.attendances.filter(a => a.studentId !== id);
+      saveStore(store);
+      return { success: true, id };
+    }
     return store.students;
+  }
+
+  if (endpoint.startsWith("/admin/teachers")) {
+    if (endpoint === "/admin/teachers" && method === "POST") {
+      const newTeacher: TeacherDTO = {
+        id: "tch-" + Date.now(),
+        userId: "u-tch-" + Date.now(),
+        teacherId: body.teacherId || `FAC-${Date.now().toString().slice(-4)}`,
+        fullName: body.fullName,
+        email: body.email,
+        phone: body.phone,
+        department: body.department,
+        status: "Active"
+      };
+      store.teachers.push(newTeacher);
+      saveStore(store);
+      return newTeacher;
+    }
+    if (method === "PUT") {
+      const id = endpoint.split("/")[3];
+      const tch = store.teachers.find(t => t.id === id);
+      if (tch) {
+        Object.assign(tch, body);
+        saveStore(store);
+        return tch;
+      }
+    }
+    if (method === "DELETE") {
+      const id = endpoint.split("/")[3];
+      store.teachers = store.teachers.filter(t => t.id !== id);
+      saveStore(store);
+      return { success: true, id };
+    }
+    return store.teachers;
+  }
+
+  if (endpoint.startsWith("/admin/classes")) {
+    if (endpoint === "/admin/classes" && method === "POST") {
+      const newClass: ClassDTO = {
+        id: "cls-" + Date.now(),
+        name: body.name,
+        code: body.code || `CLS-${Date.now().toString().slice(-4)}`,
+        department: body.department,
+        semester: body.semester,
+        batches: []
+      };
+      store.classes.push(newClass);
+      saveStore(store);
+      return newClass;
+    }
+    if (method === "PUT") {
+      const id = endpoint.split("/")[3];
+      const cls = store.classes.find(c => c.id === id);
+      if (cls) {
+        Object.assign(cls, body);
+        saveStore(store);
+        return cls;
+      }
+    }
+    if (method === "DELETE") {
+      const id = endpoint.split("/")[3];
+      store.classes = store.classes.filter(c => c.id !== id);
+      saveStore(store);
+      return { success: true, id };
+    }
+    return store.classes;
+  }
+
+  if (endpoint.startsWith("/admin/batches")) {
+    if (endpoint === "/admin/batches" && method === "POST") {
+      const newBatch = {
+        id: "bat-" + Date.now(),
+        name: body.name,
+        classId: body.classId
+      };
+      const cls = store.classes.find(c => c.id === body.classId);
+      if (cls) {
+        cls.batches = cls.batches || [];
+        cls.batches.push(newBatch);
+      }
+      saveStore(store);
+      return newBatch;
+    }
+    if (method === "PUT") {
+      const id = endpoint.split("/")[3];
+      store.classes.forEach(c => {
+        const b = c.batches?.find(batch => batch.id === id);
+        if (b) b.name = body.name || b.name;
+      });
+      saveStore(store);
+      return { id, name: body.name };
+    }
+    if (method === "DELETE") {
+      const id = endpoint.split("/")[3];
+      store.classes.forEach(c => {
+        if (c.batches) c.batches = c.batches.filter(b => b.id !== id);
+      });
+      saveStore(store);
+      return { success: true, id };
+    }
+  }
+
+  if (endpoint.startsWith("/admin/subjects")) {
+    if (endpoint === "/admin/subjects" && method === "POST") {
+      const newSubject: SubjectDTO = {
+        id: "sub-" + Date.now(),
+        name: body.name,
+        code: body.code || `SUB-${Date.now().toString().slice(-4)}`,
+        department: body.department
+      };
+      store.subjects.push(newSubject);
+      saveStore(store);
+      return newSubject;
+    }
+    if (method === "PUT") {
+      const id = endpoint.split("/")[3];
+      const sub = store.subjects.find(s => s.id === id);
+      if (sub) {
+        Object.assign(sub, body);
+        saveStore(store);
+        return sub;
+      }
+    }
+    if (method === "DELETE") {
+      const id = endpoint.split("/")[3];
+      store.subjects = store.subjects.filter(s => s.id !== id);
+      saveStore(store);
+      return { success: true, id };
+    }
+    return store.subjects;
   }
 
   // 5. Teacher Dashboard
