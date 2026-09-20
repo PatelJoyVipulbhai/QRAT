@@ -62,5 +62,15 @@
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },
+  "lavamoat": {
+    "allowScripts": {
+      "@firebase/util": true,
+      "@prisma/client": true,
+      "@prisma/engines": true,
+      "prisma": true,
+      "protobufjs": true,
+      "unrs-resolver": true
+    }
+  },
   "private": true
 }
